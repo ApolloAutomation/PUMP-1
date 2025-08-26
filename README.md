@@ -1,6 +1,6 @@
 # PUMP-1 Smart Pump Controller
 
-![Apollo Automation Logo](path/to/logo.png)
+![Apollo Automation Logo](https://github.com/jadehawk/IconsBackup/blob/main/Icons/apollo-automations-logo.png)
 
 An ESPHome-based intelligent pump controller with advanced safety features, water level monitoring, and flexible control options. The PUMP-1 is designed for reliable water management in various applications including drainage, filling, and automated irrigation systems.
 

@@ -1,5 +1,6 @@
 substitutions:
   name: apollo-pump-1
+  friendly_name: Apollo Pump-1
   version: "25.8.6.1"
   device_description: ${name} made by Apollo Automation - version ${version}.
 
@@ -9,8 +10,11 @@ esp32:
   flash_size: 8MB
   framework:
     type: esp-idf
-    
+
 esphome:
+  name: ${name}
+  name_add_mac_suffix: false
+  friendly_name: ${friendly_name}
   on_boot:
     - priority: 600
       then:
@@ -18,9 +22,17 @@ esphome:
             id(pump_start_time) = 0;
             id(safety_alert_active) = false;
         - script.execute: pump_safety_check
+
     - priority: -100
       then:
-        - delay: 1000ms 
+        - lambda: |-
+            if (id(sntp_time).now().timestamp == 0) {
+              id(last_run_timestamp) = 0;  // discard stale value
+            }
+
+    - priority: -100
+      then:
+        - delay: 1000ms
         - script.execute: statusCheck
     - priority: -10
       then:
@@ -30,6 +42,18 @@ esphome:
             then:
               - lambda: "id(testScript).execute();"
 
+# Enable logging
+logger:
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Apollo-Pump-1 Fallback Hotspot"
+    password: "D9xJDUpZF6EP"
+
 api:
   services:
     - service: play_buzzer
@@ -37,27 +61,45 @@ api:
         song_str: string
       then:
         - rtttl.play:
-            rtttl: !lambda 'return song_str;'
+            rtttl: !lambda "return song_str;"
     - service: run_pump_for_seconds
       variables:
         seconds: int
       then:
         - switch.turn_on: pump_control
-        - delay: !lambda 'return seconds * 1000;'
+        - delay: !lambda "return seconds * 1000;"
         - switch.turn_off: pump_control
     - service: run_pump_until_full
-      then: 
+      then:
         - script.execute: pumpUntilFull
 
+time:
+  - platform: sntp #<<<<<<<<<<<<<<<< Added for Interval Functionality
+    id: sntp_time
+    timezone: "America/New_York"
+
 globals:
+  - id: last_run_timestamp #<<<<<<<<<<<<<<<< Added for Interval Functionality
+    type: uint32_t
+    restore_value: yes
+    initial_value: "0"
+  - id: pump_cycle_count #<<<<<<<<<<<<<<<< Added for Interval Functionality
+    type: int
+    restore_value: yes
+    initial_value: "0"
+  - id: alert_active #<<<<<<<<<<<<<<<< Added for Interval Functionality
+    type: bool
+    restore_value: no
+    initial_value: "false"
+
   - id: pump_start_time
     restore_value: no
     type: uint32_t
-    initial_value: '0'
+    initial_value: "0"
   - id: safety_alert_active
     restore_value: no
     type: bool
-    initial_value: 'false'
+    initial_value: "false"
   - id: runTest
     restore_value: yes
     type: bool
@@ -71,12 +113,13 @@ web_server:
   port: 80
 
 # Buzzer
+
 output:
   - platform: ledc
     pin: GPIO5
     id: buzzer
 rtttl:
- output: buzzer
+  output: buzzer
 
 button:
   - platform: restart
@@ -87,28 +130,57 @@ button:
     disabled_by_default: True
     name: "Factory Reset ESP"
     id: factory_reset_all
-  
+
   - platform: template
     name: "Run Pump"
     id: run_pump_button
     icon: mdi:pump
     on_press:
       then:
+        - lambda: |- #<<<<<<<<<<<<<<<< Added for Interval Functionality
+            id(pump_cycle_count) += 1;
+            ESP_LOGD("pump", "Cycle count: %d", id(pump_cycle_count));
         - switch.turn_on: pump_control
-        - delay: !lambda 'return (int)id(pump_run_seconds).state * 1000;'
+        - delay: !lambda "return (int)id(pump_run_seconds).state * 1000;"
         - switch.turn_off: pump_control
-      
+
   - platform: template
     name: "Run Pump Until Output Wet"
     id: run_pump_until_out_wet
     icon: mdi:pump
     disabled_by_default: true
-    on_press: 
+    on_press:
       then:
         script.execute: pumpUntilFull
 
+  - platform: template
+    name: "Play Buzzer ↯" # Added to confirm Buzzer works
+    id: play_buzzer_button
+    icon: mdi:surround-sound
+    on_press:
+      then:
+        - rtttl.play: !lambda return "scale_up:d=32,o=5,b=100:c,c#,d#,e,f#,g#,a#,b";
+
+  - platform: template #<<<<<<<<<<<<<<<< Added for Interval Functionality
+    name: "Confirm Refill (Resets Pump Cycles) ↯"
+    icon: mdi:check-circle
+    on_press:
+      then:
+        - lambda: |-
+            id(pump_cycle_count) = 0;
+            id(pump_cycle_sensor).publish_state(0);
+            id(alert_active) = false;
 
 switch:
+  - platform: template #<<<<<<<<<<<<<<<< Added for Interval Functionality
+    name: "Enable Pump Interval Runs ↯"
+    id: enable_pump_interval
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_off:
+      - lambda: |-
+          id(alert_active) = false;
+
   - platform: factory_reset
     id: factory_reset_switch
     internal: true
@@ -171,7 +243,7 @@ binary_sensor:
     id: ink_ha_connected
   - platform: gpio
     id: reset_button
-    pin: 
+    pin:
       number: GPIO9
       inverted: true
       mode:
@@ -225,9 +297,40 @@ binary_sensor:
         pullup: true
       inverted: true
 
+  - platform: template #<<<<<<<<<<<<<<<< Added for Interval Functionality
+    name: "Pump Alert Active ↯"
+    lambda: |-
+      return id(alert_active);
+    icon: mdi:alert
+
 number:
+  - platform: template #<<<<<<<<<<<<<<<< Added for Interval Functionality
+    name: "Pump Interval (in Hours) ↯"
+    id: pump_interval_hours
+    icon: mdi:timer
+    min_value: 1
+    max_value: 720
+    step: 1
+    mode: box
+    initial_value: 12
+    unit_of_measurement: "hours"
+    restore_value: true
+    optimistic: true
+  - platform: template #<<<<<<<<<<<<<<<< Added for Interval Functionality
+    name: "Tank Size (oz) ↯"
+    id: tank_size_oz
+    icon: mdi:cup
+    min_value: 1
+    max_value: 128
+    step: 1
+    mode: box
+    initial_value: 64
+    unit_of_measurement: "oz"
+    restore_value: true
+    optimistic: true
+
   - platform: template
-    name: "Pump Run Seconds"
+    name: "Pump Run Seconds (1s = 15mL)"
     id: pump_run_seconds
     icon: mdi:timer
     optimistic: true
@@ -269,6 +372,32 @@ sensor:
     update_interval: 60s
     entity_category: "diagnostic"
 
+  - platform: template #<<<<<<<<<<<<<<<< Added for Interval Functionality
+    name: "Pump Cycle Count ↯"
+    id: pump_cycle_sensor
+    lambda: |-
+      return id(pump_cycle_count);
+    update_interval: 30s
+    accuracy_decimals: 0
+    icon: mdi:counter
+  - platform: template #<<<<<<<<<<<<<<<< Added for Interval Functionality
+    name: "Pump Cycle Threshold (Computed) ↯"
+    id: pump_cycle_threshold
+    lambda: |-
+      // Flow: 900 mL/min → 15 mL/s → ~0.507 oz/s
+      const float flow_oz_per_sec = 900.0f / 60.0f / 29.5735f;
+      const float run_s = id(pump_run_seconds).state;
+      const float tank_oz = id(tank_size_oz).state;
+
+      if (run_s <= 0.0f || tank_oz <= 0.0f) return 0.0f;
+
+      const float dose_oz_per_cycle = flow_oz_per_sec * run_s;
+      return ceilf(tank_oz / dose_oz_per_cycle);
+    update_interval: 10s
+    unit_of_measurement: "Cycles"
+    accuracy_decimals: 0
+    icon: mdi:counter
+
 light:
   - platform: esp32_rmt_led_strip
     id: rgb_light
@@ -298,17 +427,17 @@ script:
   - id: pumpUntilFull
     then:
       - switch.turn_on: stop_pump_when_full
-      - delay: 100ms  # Small delay to ensure switch state is updated
+      - delay: 100ms # Small delay to ensure switch state is updated
       - switch.turn_on: pump_control
-      
+
   - id: statusCheck
     then:
       - if:
           condition:
-            - lambda: 'return id(ink_ha_connected).state;'
+            - lambda: "return id(ink_ha_connected).state;"
           then:
             - logger.log: "Apollo Automation: Connected To HA"
-            - light.turn_on: 
+            - light.turn_on:
                 id: rgb_light
                 brightness: 100%
                 red: 0%
@@ -320,7 +449,7 @@ script:
                   - wifi.connected
                 then:
                   - logger.log: "Apollo Automation: Connected To Wifi"
-                  - light.turn_on: 
+                  - light.turn_on:
                       id: rgb_light
                       brightness: 100%
                       red: 0%
@@ -328,7 +457,7 @@ script:
                       blue: 0%
                 else:
                   - logger.log: "Apollo Automation: Not Connected To Wifi"
-                  - light.turn_on: 
+                  - light.turn_on:
                       id: rgb_light
                       brightness: 100%
                       red: 100%
@@ -339,7 +468,7 @@ script:
   - id: run_pump_timed
     then:
       - switch.turn_on: pump_control
-      - delay: !lambda 'return (int)id(pump_run_seconds).state * 1000;'
+      - delay: !lambda "return (int)id(pump_run_seconds).state * 1000;"
       - switch.turn_off: pump_control
   - id: pump_safety_check
     mode: restart
@@ -376,7 +505,7 @@ script:
             - delay: 1s
   - id: testScript
     then:
-      if: 
+      if:
         condition:
           - lambda: "return id(runTest) == true;"
         then:
@@ -396,3 +525,124 @@ script:
               blue: 0%
           - light.turn_off:
               id: rgb_light
+
+  - id: run_buzzer_alert #<<<<<<<<<<<<<<<< Added for Interval Functionality
+    mode: restart
+    then:
+      - output.ledc.set_frequency:
+          id: buzzer
+          frequency: 1500Hz
+      - output.set_level:
+          id: buzzer
+          level: 50%
+      - delay: 500ms
+      - output.set_level:
+          id: buzzer
+          level: 0%
+
+#======================================================================
+# Interval schedulers for Intervals, alerts, and LED state.
+#======================================================================
+interval:
+  # Scheduler: run at set interval if enabled and fluid is present or cycle threshold not exceeded.
+  - interval: 60s
+    then:
+      - lambda: |-
+          if (!id(enable_pump_interval).state) {
+            ESP_LOGD("pump", "Interval skipped: pump interval disabled");
+            return;
+          }
+
+          // 🔍 Primary check: ultrasonic fluid sensor
+          if (id(stop_pump_when_dry).state && !id(fluid_input_sensor).state) {
+            id(alert_active) = true;
+            ESP_LOGD("pump", "Interval blocked: fluid sensor reports dry and stop_pump_when_dry is enabled");
+            return;
+          }
+
+          // 🧮 Fallback check: cycle threshold
+          if (id(pump_cycle_count) >= (int) id(pump_cycle_threshold).state) {
+            id(alert_active) = true;
+            ESP_LOGD("pump", "Interval blocked: cycle threshold reached, Tank Might be Empty!");
+            return;
+          }
+
+          // 🕒 Time-based interval logic
+          uint32_t now = id(sntp_time).now().timestamp;
+          if (now == 0) {
+            now = millis() / 1000;
+            ESP_LOGD("pump", "Using millis() as fallback timestamp");
+          }
+
+          uint32_t interval_s = (uint32_t)(id(pump_interval_hours).state * 3600);
+          if ((now - id(last_run_timestamp)) >= interval_s) {
+            id(last_run_timestamp) = now;
+            id(run_pump_button).press();
+            id(pump_cycle_count) += 1;
+            id(pump_cycle_sensor).publish_state(id(pump_cycle_count));
+            ESP_LOGD("pump", "Cycle count: %d", id(pump_cycle_count));
+          }
+
+  # Alert buzzer reminder while enabled and alert is active.
+  - interval: 60s
+    then:
+      - lambda: |-
+          if (id(alert_active) && id(enable_pump_interval).state) {
+            id(run_buzzer_alert).execute();                       
+          }
+
+  # LED feedback: fluid sensor is primary; warn near threshold; red pulse on alert.
+  - interval: 60s
+    then:
+      - lambda: |-
+          auto count = id(pump_cycle_count);                      
+          auto threshold = (int) id(pump_cycle_threshold).state;
+
+          if (!id(enable_pump_interval).state) {
+            id(rgb_light).turn_off();                             
+            return;
+          }
+
+          // 🔍 Primary check: ultrasonic fluid sensor
+          if (!id(fluid_input_sensor).state) {
+            id(rgb_light).turn_on();  // Red alert will be handled below
+            return;
+          }
+
+          // 🧮 Fallback: warn if near threshold
+          if (id(alert_active)) {
+            id(rgb_light).turn_on();                              
+          } else if (count >= threshold - 6) {
+            id(rgb_light).turn_on();                              
+          } else {
+            id(rgb_light).turn_off();                             
+          }
+
+      - if:
+          condition:
+            lambda: |-
+              // Red pulse if alert is active or fluid is missing
+              return id(alert_active) || !id(fluid_input_sensor).state;
+          then:
+            - light.turn_on:
+                id: rgb_light
+                brightness: 100%
+                red: 100%
+                green: 0%
+                blue: 0%
+                effect: "Slow Pulse"
+
+      - if:
+          condition:
+            lambda: |-
+              auto count = id(pump_cycle_count);                  
+              auto threshold = (int) id(pump_cycle_threshold).state;
+              return count >= threshold - 6 && id(fluid_input_sensor).state && !id(alert_active);
+          then:
+            - light.turn_on:
+                id: rgb_light
+                brightness: 100%
+                red: 100%
+                green: 100%
+                blue: 0%
+                effect: "Slow Pulse"

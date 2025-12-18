@@ -1,6 +1,6 @@
 substitutions:
   name: apollo-pump-1
-  version: "25.11.6.1"
+  version: "25.12.18.1"
   device_description: ${name} made by Apollo Automation - version ${version}.
 
 esp32:
@@ -31,21 +31,21 @@ esphome:
               - lambda: "id(testScript).execute();"
 
 api:
-  services:
-    - service: play_buzzer
+  actions:
+    - action: play_buzzer
       variables:
         song_str: string
       then:
         - rtttl.play:
             rtttl: !lambda 'return song_str;'
-    - service: run_pump_for_seconds
+    - action: run_pump_for_seconds
       variables:
         seconds: int
       then:
         - switch.turn_on: pump_control
         - delay: !lambda 'return seconds * 1000;'
         - switch.turn_off: pump_control
-    - service: run_pump_until_full
+    - action: run_pump_until_full
       then: 
         - script.execute: pumpUntilFull
 
@@ -177,6 +177,7 @@ binary_sensor:
       mode:
         input: true
         pullup: true
+      ignore_strapping_warning: true
     on_multi_click:
       - timing:
           - ON for at least 10s
@@ -369,7 +370,7 @@ script:
                 condition:
                   - and:
                       - switch.is_on: stop_pump_when_dry
-                      - binary_sensor.is_on: fluid_input_sensor
+                      - binary_sensor.is_off: fluid_input_sensor
                 then:
                   - logger.log: "Pump stopping - input dry"
                   - switch.turn_off: pump_control

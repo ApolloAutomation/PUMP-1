@@ -1,6 +1,6 @@
 # PUMP-1 Smart Pump Controller
 
-![Apollo Automation Logo](path/to/logo.png)
+![Apollo Automation Logo](https://apolloautomation.com/cdn/shop/files/PUMP-1_Main_2.jpg)
 
 An ESPHome-based intelligent pump controller with advanced safety features, water level monitoring, and flexible control options. The PUMP-1 is designed for reliable water management in various applications including drainage, filling, and automated irrigation systems.
 
@@ -22,7 +22,7 @@ An ESPHome-based intelligent pump controller with advanced safety features, wate
 1. **Home Assistant Integration**: Full control via Home Assistant dashboard
 2. **Web Interface**: Built-in web server for local control
 3. **Physical Button**: Quick pump activation via reset button tap
-4. **API Services**: Programmatic control through ESPHome API
+4. **API Actions**: Programmatic control through ESPHome API
 5. **Manual Switch**: Direct pump control toggle
 
 ### Monitoring & Alerts
@@ -72,15 +72,15 @@ automation:
       - platform: time
         at: "06:00:00"
     action:
-      - service: esphome.apollo_pump_1_run_pump_for_seconds
+      - action: esphome.apollo_pump_1_run_pump_for_seconds
         data:
           seconds: 60
 ```
 
-### API Service Call
+### API Action Call
 ```yaml
 # Run pump for specific duration
-service: esphome.apollo_pump_1_run_pump_for_seconds
+action: esphome.apollo_pump_1_run_pump_for_seconds
 data:
   seconds: 30
 ```
@@ -91,7 +91,7 @@ data:
 
 ## 🔌 API Documentation
 
-### Available Services
+### Available Actions
 
 #### `run_pump_for_seconds`
 Runs the pump for a specified duration.
@@ -110,9 +110,7 @@ Plays a custom RTTTL melody.
 | `pump_control` | Switch | Main pump control |
 | `water_exists` | Binary Sensor | Water detection status |
 | `pump_run_seconds` | Number | Configurable runtime |
-| `water_protection_override` | Switch | Bypass water safety |
-| `hourly_water_check_enabled` | Switch | Enable hourly monitoring |
-| `invert_water_logic` | Switch | Reverse water logic |
+| `pump_safety_override` | Switch | Bypass max safe run time |
 
 ## 🛡️ Safety Features
 

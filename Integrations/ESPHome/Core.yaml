@@ -300,6 +300,7 @@ text_sensor:
     ip_address:
       name: "IP Address"
       id: wifi_ip
+      entity_category: "diagnostic"
   - platform: version
     name: "ESPHome Version"
     hide_timestamp: true

@@ -295,6 +295,12 @@ light:
           min_brightness: 50%
           max_brightness: 100%
 
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
+      id: wifi_ip
+
 script:
   - id: pumpUntilFull
     then:

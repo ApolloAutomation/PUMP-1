@@ -3,9 +3,6 @@ esphome:
   friendly_name: Apollo PUMP-1
   comment: Apollo PUMP-1
   name_add_mac_suffix: true
-  platformio_options:
-    board_build.flash_mode: dio
-
   project:
     name: "ApolloAutomation.PUMP-1"
     version: "${version}"

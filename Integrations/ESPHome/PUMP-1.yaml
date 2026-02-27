@@ -3,9 +3,6 @@ esphome:
   friendly_name: Apollo PUMP-1
   comment: Apollo PUMP-1
   name_add_mac_suffix: true
-  platformio_options:
-    board_build.flash_mode: dio
-
   on_boot:
   - priority: -10
     then:
@@ -48,11 +45,6 @@ update:
     source: https://apolloautomation.github.io/PUMP-1/firmware/manifest.json
 
 wifi:
-  on_connect:
-    - delay: 5s
-    - ble.disable:
-  on_disconnect:
-    - ble.enable:
   ap:
     ssid: "Apollo PUMP-1 Hotspot"
 

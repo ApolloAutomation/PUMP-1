@@ -128,6 +128,20 @@ switch:
     icon: mdi:water-sync
     entity_category: config
   - platform: template
+    name: "Invert Water Logic"
+    id: invert_water_logic
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    icon: mdi:water-sync
+    entity_category: config
+  - platform: template
+    name: "Auto Refill"
+    id: auto_refill
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    icon: mdi:autorenew
+    entity_category: config
+  - platform: template
     name: "Pump Safety Override"
     id: pump_safety_override
     entity_category: config
@@ -147,7 +161,15 @@ switch:
         - if:
             condition:
               or:
-                - binary_sensor.is_on: fluid_input_sensor
+                # Normal mode: input has water
+                - and:
+                    - switch.is_off: invert_water_logic
+                    - binary_sensor.is_on: fluid_input_sensor
+                # Inverted mode: input is dry (destination is low, needs filling)
+                - and:
+                    - switch.is_on: invert_water_logic
+                    - binary_sensor.is_off: fluid_input_sensor
+                # Bypass: dry protection not enabled
                 - switch.is_off: stop_pump_when_dry
             then:
               - logger.log: "Pump turning on - conditions met"
@@ -213,6 +235,18 @@ binary_sensor:
         input: true
         pullup: true
       inverted: true
+    on_state:
+      then:
+        - if:
+            condition:
+              and:
+                - switch.is_on: auto_refill
+                - switch.is_on: invert_water_logic
+                - binary_sensor.is_off: fluid_input_sensor
+                - switch.is_off: pump_control
+            then:
+              - logger.log: "Auto refill triggered - tank level low"
+              - script.execute: pumpUntilFull
 
   - platform: gpio
     name: Fluid Output
@@ -387,7 +421,16 @@ script:
             - if:
                 condition:
                   - and:
+                      - switch.is_on: invert_water_logic
+                      - binary_sensor.is_on: fluid_input_sensor
+                then:
+                  - logger.log: "Pump stopping - destination full (inverted mode)"
+                  - switch.turn_off: pump_control
+            - if:
+                condition:
+                  - and:
                       - switch.is_on: stop_pump_when_dry
+                      - switch.is_off: invert_water_logic
                       - binary_sensor.is_off: fluid_input_sensor
                 then:
                   - logger.log: "Pump stopping - input dry"

@@ -235,14 +235,13 @@ binary_sensor:
         input: true
         pullup: true
       inverted: true
-    on_state:
+    on_release:
       then:
         - if:
             condition:
               and:
                 - switch.is_on: auto_refill
                 - switch.is_on: invert_water_logic
-                - binary_sensor.is_off: fluid_input_sensor
                 - switch.is_off: pump_control
             then:
               - logger.log: "Auto refill triggered - tank level low"

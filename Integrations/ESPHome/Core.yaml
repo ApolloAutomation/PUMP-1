@@ -421,6 +421,7 @@ script:
                 condition:
                   - and:
                       - switch.is_on: invert_water_logic
+                      - switch.is_off: stop_pump_when_full
                       - binary_sensor.is_on: fluid_input_sensor
                 then:
                   - logger.log: "Pump stopping - destination full (inverted mode)"

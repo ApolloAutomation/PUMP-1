@@ -4,6 +4,11 @@ esphome:
   comment: Apollo PUMP-1
   name_add_mac_suffix: true
   on_boot:
+  - priority: 500
+    then:
+      - text_sensor.template.publish:
+          id: apollo_firmware_version
+          state: "${version}"
   - priority: -10
     then:
       - if:

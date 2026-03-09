@@ -245,6 +245,11 @@ binary_sensor:
                 - switch.is_off: pump_control
             then:
               - logger.log: "Auto refill triggered - tank level low"
+              - homeassistant.action:
+                  action: logbook.log
+                  data:
+                    name: "PUMP-1"
+                    message: "Auto refill triggered - tank level low"
               - script.execute: pumpUntilFull
 
   - platform: gpio

@@ -173,9 +173,9 @@ switch:
                 - switch.is_off: stop_pump_when_dry
             then:
               - logger.log: "Pump turning on - conditions met"
-              - event.trigger:
-                  id: pump_activity_event
-                  event_type: pump_started
+              - text_sensor.template.publish:
+                  id: last_pump_action
+                  state: "Pump Started"
               - lambda: |-
                   id(pump_start_time) = millis();
                   id(safety_alert_active) = false;
@@ -190,9 +190,9 @@ switch:
               lambda: 'return id(pump_start_time) != 0;'
             then:
               - logger.log: "Pump turned off"
-              - event.trigger:
-                  id: pump_activity_event
-                  event_type: pump_stopped
+              - text_sensor.template.publish:
+                  id: last_pump_action
+                  state: "Pump Stopped"
         - lambda: |-
             id(pump_start_time) = 0;
             id(safety_alert_active) = false;
@@ -255,9 +255,9 @@ binary_sensor:
                 - switch.is_off: pump_control
             then:
               - logger.log: "Auto refill triggered - tank level low"
-              - event.trigger:
-                  id: pump_activity_event
-                  event_type: auto_refill_triggered
+              - text_sensor.template.publish:
+                  id: last_pump_action
+                  state: "Auto Refill Triggered"
               - script.execute: pumpUntilFull
 
   - platform: gpio
@@ -341,17 +341,11 @@ light:
           min_brightness: 50%
           max_brightness: 100%
 
-event:
-  - platform: template
-    name: "Pump Activity"
-    id: pump_activity_event
-    icon: mdi:pump
-    event_types:
-      - auto_refill_triggered
-      - pump_started
-      - pump_stopped
-
 text_sensor:
+  - platform: template
+    name: "Last Pump Action"
+    id: last_pump_action
+    icon: mdi:pump
   - platform: wifi_info
     ip_address:
       name: "IP Address"

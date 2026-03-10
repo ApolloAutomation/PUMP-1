@@ -185,13 +185,17 @@ switch:
               - switch.turn_off: pump_control
     on_turn_off:
       then:
+        - if:
+            condition:
+              lambda: 'return id(pump_start_time) != 0;'
+            then:
+              - logger.log: "Pump turned off"
+              - event.trigger:
+                  id: pump_activity_event
+                  event_type: pump_stopped
         - lambda: |-
             id(pump_start_time) = 0;
             id(safety_alert_active) = false;
-        - logger.log: "Pump turned off"
-        - event.trigger:
-            id: pump_activity_event
-            event_type: pump_stopped
 
 binary_sensor:
   - platform: status

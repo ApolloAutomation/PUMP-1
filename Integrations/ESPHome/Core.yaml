@@ -173,6 +173,9 @@ switch:
                 - switch.is_off: stop_pump_when_dry
             then:
               - logger.log: "Pump turning on - conditions met"
+              - event.trigger:
+                  id: pump_activity_event
+                  event_type: pump_started
               - lambda: |-
                   id(pump_start_time) = millis();
                   id(safety_alert_active) = false;
@@ -186,6 +189,9 @@ switch:
             id(pump_start_time) = 0;
             id(safety_alert_active) = false;
         - logger.log: "Pump turned off"
+        - event.trigger:
+            id: pump_activity_event
+            event_type: pump_stopped
 
 binary_sensor:
   - platform: status
@@ -245,11 +251,9 @@ binary_sensor:
                 - switch.is_off: pump_control
             then:
               - logger.log: "Auto refill triggered - tank level low"
-              - homeassistant.action:
-                  action: logbook.log
-                  data:
-                    name: "PUMP-1"
-                    message: "Auto refill triggered - tank level low"
+              - event.trigger:
+                  id: pump_activity_event
+                  event_type: auto_refill_triggered
               - script.execute: pumpUntilFull
 
   - platform: gpio
@@ -332,6 +336,16 @@ light:
           update_interval: 100ms
           min_brightness: 50%
           max_brightness: 100%
+
+event:
+  - platform: template
+    name: "Pump Activity"
+    id: pump_activity_event
+    icon: mdi:pump
+    event_types:
+      - auto_refill_triggered
+      - pump_started
+      - pump_stopped
 
 text_sensor:
   - platform: wifi_info

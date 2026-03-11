@@ -17,9 +17,20 @@ esphome:
             id(pump_start_time) = 0;
             id(safety_alert_active) = false;
         - script.execute: pump_safety_check
+    - priority: -20
+      then:
+        - if:
+            condition:
+              switch.is_on: tank_refill_mode
+            then:
+              - switch.turn_on: stop_pump_when_full
+              - switch.turn_off: stop_pump_when_dry
+            else:
+              - switch.turn_off: stop_pump_when_full
+              - switch.turn_on: stop_pump_when_dry
     - priority: -100
       then:
-        - delay: 1000ms 
+        - delay: 1000ms
         - script.execute: statusCheck
     - priority: -10
       then:

@@ -25,9 +25,11 @@ esphome:
             then:
               - switch.turn_on: stop_pump_when_full
               - switch.turn_off: stop_pump_when_dry
+              - switch.turn_on: auto_refill
             else:
               - switch.turn_off: stop_pump_when_full
               - switch.turn_on: stop_pump_when_dry
+              - switch.turn_off: auto_refill
     - priority: -100
       then:
         - delay: 1000ms
@@ -149,10 +151,12 @@ switch:
       then:
         - switch.turn_on: stop_pump_when_full
         - switch.turn_off: stop_pump_when_dry
+        - switch.turn_on: auto_refill
     on_turn_off:
       then:
         - switch.turn_off: stop_pump_when_full
         - switch.turn_on: stop_pump_when_dry
+        - switch.turn_off: auto_refill
   - platform: template
     name: "Auto Refill"
     id: auto_refill

@@ -17,9 +17,22 @@ esphome:
             id(pump_start_time) = 0;
             id(safety_alert_active) = false;
         - script.execute: pump_safety_check
+    - priority: -20
+      then:
+        - if:
+            condition:
+              switch.is_on: tank_refill_mode
+            then:
+              - switch.turn_on: stop_pump_when_full
+              - switch.turn_off: stop_pump_when_dry
+              - switch.turn_on: auto_refill
+            else:
+              - switch.turn_off: stop_pump_when_full
+              - switch.turn_on: stop_pump_when_dry
+              - switch.turn_off: auto_refill
     - priority: -100
       then:
-        - delay: 1000ms 
+        - delay: 1000ms
         - script.execute: statusCheck
     - priority: -10
       then:
@@ -128,12 +141,22 @@ switch:
     icon: mdi:water-sync
     entity_category: config
   - platform: template
-    name: "Invert Water Logic"
-    id: invert_water_logic
+    name: "Tank Refill Mode"
+    id: tank_refill_mode
     optimistic: true
     restore_mode: RESTORE_DEFAULT_OFF
     icon: mdi:water-sync
     entity_category: config
+    on_turn_on:
+      then:
+        - switch.turn_on: stop_pump_when_full
+        - switch.turn_off: stop_pump_when_dry
+        - switch.turn_on: auto_refill
+    on_turn_off:
+      then:
+        - switch.turn_off: stop_pump_when_full
+        - switch.turn_on: stop_pump_when_dry
+        - switch.turn_off: auto_refill
   - platform: template
     name: "Auto Refill"
     id: auto_refill
@@ -163,11 +186,11 @@ switch:
               or:
                 # Normal mode: input has water
                 - and:
-                    - switch.is_off: invert_water_logic
+                    - switch.is_off: tank_refill_mode
                     - binary_sensor.is_on: fluid_input_sensor
                 # Inverted mode: input is dry (destination is low, needs filling)
                 - and:
-                    - switch.is_on: invert_water_logic
+                    - switch.is_on: tank_refill_mode
                     - binary_sensor.is_off: fluid_input_sensor
                 # Bypass: dry protection not enabled
                 - switch.is_off: stop_pump_when_dry
@@ -251,7 +274,7 @@ binary_sensor:
             condition:
               and:
                 - switch.is_on: auto_refill
-                - switch.is_on: invert_water_logic
+                - switch.is_on: tank_refill_mode
                 - switch.is_off: pump_control
             then:
               - logger.log: "Auto refill triggered - tank level low"
@@ -435,7 +458,7 @@ script:
             - if:
                 condition:
                   - and:
-                      - switch.is_on: invert_water_logic
+                      - switch.is_on: tank_refill_mode
                       - switch.is_off: stop_pump_when_full
                       - binary_sensor.is_on: fluid_input_sensor
                 then:
@@ -445,7 +468,7 @@ script:
                 condition:
                   - and:
                       - switch.is_on: stop_pump_when_dry
-                      - switch.is_off: invert_water_logic
+                      - switch.is_off: tank_refill_mode
                       - binary_sensor.is_off: fluid_input_sensor
                 then:
                   - logger.log: "Pump stopping - input dry"

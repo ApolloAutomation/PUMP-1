@@ -268,6 +268,9 @@ binary_sensor:
         input: true
         pullup: true
       inverted: true
+    filters:
+      - delayed_on: 5s
+      - delayed_off: 5s
     on_release:
       then:
         - if:
@@ -285,7 +288,7 @@ binary_sensor:
 
   - platform: gpio
     name: Fluid Output
-    id: fulid_output_sensor
+    id: fluid_output_sensor
     icon: mdi:water
     device_class: moisture
     pin:
@@ -294,6 +297,8 @@ binary_sensor:
         input: true
         pullup: true
       inverted: true
+    filters:
+      - delayed_off: 5s
 
 number:
   - platform: template
@@ -442,7 +447,7 @@ script:
                 condition:
                   - and:
                       - switch.is_on: stop_pump_when_full
-                      - binary_sensor.is_on: fulid_output_sensor
+                      - binary_sensor.is_on: fluid_output_sensor
                 then:
                   - logger.log: "Pump stopping - tank full"
                   - switch.turn_off: pump_control

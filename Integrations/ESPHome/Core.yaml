@@ -76,6 +76,14 @@ globals:
     initial_value: "true"
   - id: testCycleCount
     type: int
+  - id: output_wet_count
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: input_dry_count
+    type: int
+    restore_value: no
+    initial_value: '0'
 
 captive_portal:
 
@@ -202,6 +210,8 @@ switch:
               - lambda: |-
                   id(pump_start_time) = millis();
                   id(safety_alert_active) = false;
+                  id(output_wet_count) = 0;
+                  id(input_dry_count) = 0;
               - script.execute: pump_safety_check
             else:
               - logger.log: "Pump blocked - water conditions not met"
@@ -270,9 +280,11 @@ binary_sensor:
       inverted: true
     on_release:
       then:
+        - delay: !lambda 'return (int)id(sensor_debounce_seconds).state * 1000;'
         - if:
             condition:
               and:
+                - binary_sensor.is_off: fluid_input_sensor
                 - switch.is_on: auto_refill
                 - switch.is_on: tank_refill_mode
                 - switch.is_off: pump_control
@@ -285,7 +297,7 @@ binary_sensor:
 
   - platform: gpio
     name: Fluid Output
-    id: fulid_output_sensor
+    id: fluid_output_sensor
     icon: mdi:water
     device_class: moisture
     pin:
@@ -318,6 +330,20 @@ number:
     max_value: 600
     step: 10
     initial_value: 60
+    unit_of_measurement: "s"
+    restore_value: true
+    mode: box
+  - platform: template
+    name: "Sensor Debounce Seconds"
+    id: sensor_debounce_seconds
+    icon: mdi:timer-sand
+    entity_category: config
+    disabled_by_default: true
+    optimistic: true
+    min_value: 0
+    max_value: 30
+    step: 1
+    initial_value: 0
     unit_of_measurement: "s"
     restore_value: true
     mode: box
@@ -438,13 +464,37 @@ script:
           condition:
             - switch.is_on: pump_control
           then:
+            # Debounce counters for sensor readings
+            - lambda: |-
+                int debounce = (int)id(sensor_debounce_seconds).state;
+                // Output sensor wet counter (stop when full)
+                if (id(stop_pump_when_full).state && id(fluid_output_sensor).state) {
+                  id(output_wet_count) += 1;
+                } else if (id(tank_refill_mode).state && !id(stop_pump_when_full).state && id(fluid_input_sensor).state) {
+                  // Inverted mode: input sensor wet = destination full
+                  id(output_wet_count) += 1;
+                } else {
+                  id(output_wet_count) = 0;
+                }
+                // Input sensor dry counter (stop when dry)
+                if (id(stop_pump_when_dry).state && !id(tank_refill_mode).state && !id(fluid_input_sensor).state) {
+                  id(input_dry_count) += 1;
+                } else {
+                  id(input_dry_count) = 0;
+                }
             - if:
                 condition:
-                  - and:
-                      - switch.is_on: stop_pump_when_full
-                      - binary_sensor.is_on: fulid_output_sensor
+                  - lambda: |-
+                      int debounce = (int)id(sensor_debounce_seconds).state;
+                      return id(output_wet_count) > 0 && (debounce == 0 || id(output_wet_count) >= debounce);
                 then:
-                  - logger.log: "Pump stopping - tank full"
+                  - if:
+                      condition:
+                        - switch.is_on: stop_pump_when_full
+                      then:
+                        - logger.log: "Pump stopping - tank full"
+                      else:
+                        - logger.log: "Pump stopping - destination full (inverted mode)"
                   - switch.turn_off: pump_control
             - if:
                 condition:
@@ -457,19 +507,9 @@ script:
                   - switch.turn_off: pump_control
             - if:
                 condition:
-                  - and:
-                      - switch.is_on: tank_refill_mode
-                      - switch.is_off: stop_pump_when_full
-                      - binary_sensor.is_on: fluid_input_sensor
-                then:
-                  - logger.log: "Pump stopping - destination full (inverted mode)"
-                  - switch.turn_off: pump_control
-            - if:
-                condition:
-                  - and:
-                      - switch.is_on: stop_pump_when_dry
-                      - switch.is_off: tank_refill_mode
-                      - binary_sensor.is_off: fluid_input_sensor
+                  - lambda: |-
+                      int debounce = (int)id(sensor_debounce_seconds).state;
+                      return id(input_dry_count) > 0 && (debounce == 0 || id(input_dry_count) >= debounce);
                 then:
                   - logger.log: "Pump stopping - input dry"
                   - switch.turn_off: pump_control

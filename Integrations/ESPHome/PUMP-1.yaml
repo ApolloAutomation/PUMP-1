@@ -50,6 +50,8 @@ update:
     source: https://apolloautomation.github.io/PUMP-1/firmware/manifest.json
 
 wifi:
+  on_connect:
+    - component.update: firmware_update
   ap:
     ssid: "Apollo PUMP-1 Hotspot"
 

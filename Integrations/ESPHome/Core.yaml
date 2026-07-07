@@ -1,10 +1,9 @@
 substitutions:
   name: apollo-pump-1
-  version: "25.12.18.1"
+  version: "26.3.2.1"
   device_description: ${name} made by Apollo Automation - version ${version}.
 
 esp32:
-  board: esp32-c6-devkitm-1
   variant: esp32c6
   flash_size: 8MB
   framework:
@@ -18,9 +17,22 @@ esphome:
             id(pump_start_time) = 0;
             id(safety_alert_active) = false;
         - script.execute: pump_safety_check
+    - priority: -20
+      then:
+        - if:
+            condition:
+              switch.is_on: tank_refill_mode
+            then:
+              - switch.turn_on: stop_pump_when_full
+              - switch.turn_off: stop_pump_when_dry
+              - switch.turn_on: auto_refill
+            else:
+              - switch.turn_off: stop_pump_when_full
+              - switch.turn_on: stop_pump_when_dry
+              - switch.turn_off: auto_refill
     - priority: -100
       then:
-        - delay: 1000ms 
+        - delay: 1000ms
         - script.execute: statusCheck
     - priority: -10
       then:
@@ -69,6 +81,7 @@ captive_portal:
 
 web_server:
   port: 80
+  version: 3
 
 # Buzzer
 output:
@@ -128,6 +141,30 @@ switch:
     icon: mdi:water-sync
     entity_category: config
   - platform: template
+    name: "Tank Refill Mode"
+    id: tank_refill_mode
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    icon: mdi:water-sync
+    entity_category: config
+    on_turn_on:
+      then:
+        - switch.turn_on: stop_pump_when_full
+        - switch.turn_off: stop_pump_when_dry
+        - switch.turn_on: auto_refill
+    on_turn_off:
+      then:
+        - switch.turn_off: stop_pump_when_full
+        - switch.turn_on: stop_pump_when_dry
+        - switch.turn_off: auto_refill
+  - platform: template
+    name: "Auto Refill"
+    id: auto_refill
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    icon: mdi:autorenew
+    entity_category: config
+  - platform: template
     name: "Pump Safety Override"
     id: pump_safety_override
     entity_category: config
@@ -147,10 +184,21 @@ switch:
         - if:
             condition:
               or:
-                - binary_sensor.is_on: fluid_input_sensor
+                # Normal mode: input has water
+                - and:
+                    - switch.is_off: tank_refill_mode
+                    - binary_sensor.is_on: fluid_input_sensor
+                # Inverted mode: input is dry (destination is low, needs filling)
+                - and:
+                    - switch.is_on: tank_refill_mode
+                    - binary_sensor.is_off: fluid_input_sensor
+                # Bypass: dry protection not enabled
                 - switch.is_off: stop_pump_when_dry
             then:
               - logger.log: "Pump turning on - conditions met"
+              - text_sensor.template.publish:
+                  id: last_pump_action
+                  state: "Pump Started"
               - lambda: |-
                   id(pump_start_time) = millis();
                   id(safety_alert_active) = false;
@@ -160,10 +208,17 @@ switch:
               - switch.turn_off: pump_control
     on_turn_off:
       then:
+        - if:
+            condition:
+              lambda: 'return id(pump_start_time) != 0;'
+            then:
+              - logger.log: "Pump turned off"
+              - text_sensor.template.publish:
+                  id: last_pump_action
+                  state: "Pump Stopped"
         - lambda: |-
             id(pump_start_time) = 0;
             id(safety_alert_active) = false;
-        - logger.log: "Pump turned off"
 
 binary_sensor:
   - platform: status
@@ -213,6 +268,20 @@ binary_sensor:
         input: true
         pullup: true
       inverted: true
+    on_release:
+      then:
+        - if:
+            condition:
+              and:
+                - switch.is_on: auto_refill
+                - switch.is_on: tank_refill_mode
+                - switch.is_off: pump_control
+            then:
+              - logger.log: "Auto refill triggered - tank level low"
+              - text_sensor.template.publish:
+                  id: last_pump_action
+                  state: "Auto Refill Triggered"
+              - script.execute: pumpUntilFull
 
   - platform: gpio
     name: Fluid Output
@@ -295,6 +364,26 @@ light:
           min_brightness: 50%
           max_brightness: 100%
 
+text_sensor:
+  - platform: template
+    name: "Last Pump Action"
+    id: last_pump_action
+    icon: mdi:pump
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
+      id: wifi_ip
+      entity_category: "diagnostic"
+  - platform: version
+    name: "ESPHome Version"
+    hide_timestamp: true
+    entity_category: "diagnostic"
+  - platform: template
+    name: "Apollo Firmware Version"
+    id: apollo_firmware_version
+    update_interval: never
+    entity_category: "diagnostic"
+
 script:
   - id: pumpUntilFull
     then:
@@ -369,7 +458,17 @@ script:
             - if:
                 condition:
                   - and:
+                      - switch.is_on: tank_refill_mode
+                      - switch.is_off: stop_pump_when_full
+                      - binary_sensor.is_on: fluid_input_sensor
+                then:
+                  - logger.log: "Pump stopping - destination full (inverted mode)"
+                  - switch.turn_off: pump_control
+            - if:
+                condition:
+                  - and:
                       - switch.is_on: stop_pump_when_dry
+                      - switch.is_off: tank_refill_mode
                       - binary_sensor.is_off: fluid_input_sensor
                 then:
                   - logger.log: "Pump stopping - input dry"

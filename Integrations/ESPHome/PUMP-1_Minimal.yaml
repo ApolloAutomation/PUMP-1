@@ -3,14 +3,17 @@ esphome:
   friendly_name: Apollo PUMP-1
   comment: Apollo PUMP-1
   name_add_mac_suffix: true
-  platformio_options:
-    board_build.flash_mode: dio
-
   project:
     name: "ApolloAutomation.PUMP-1"
     version: "${version}"
 
   min_version: 2023.11.1
+  on_boot:
+    priority: 500
+    then:
+      - text_sensor.template.publish:
+          id: apollo_firmware_version
+          state: "${version}"
 
 dashboard_import:
   package_import_url: github://ApolloAutomation/PUMP-1/Integrations/ESPHome/PUMP-1_Minimal.yaml

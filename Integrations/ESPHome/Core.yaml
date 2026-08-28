@@ -1,6 +1,6 @@
 substitutions:
   name: apollo-pump-1
-  version: "26.3.2.1"
+  version: "26.8.27.1"
   device_description: ${name} made by Apollo Automation - version ${version}.
 
 esp32:

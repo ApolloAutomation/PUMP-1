@@ -21,7 +21,7 @@ esphome:
     name: "ApolloAutomation.PUMP-1"
     version: "${version}"
 
-  min_version: 2023.11.1
+  min_version: 2026.8.0
 
 dashboard_import:
   package_import_url: github://ApolloAutomation/PUMP-1/Integrations/ESPHome/PUMP-1_Minimal.yaml

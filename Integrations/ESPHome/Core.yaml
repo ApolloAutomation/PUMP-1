@@ -1,6 +1,6 @@
 substitutions:
   name: apollo-pump-1
-  version: "26.8.27.1"
+  version: "26.9.29.1"
   device_description: ${name} made by Apollo Automation - version ${version}.
 
 esp32:
@@ -328,11 +328,6 @@ sensor:
     id: sys_esp_temperature
     disabled_by_default: true
 
-  - platform: uptime
-    name: Uptime
-    id: sys_uptime
-    update_interval: 60s
-
   - platform: wifi_signal
     name: RSSI
     id: wifi_signal_db
@@ -383,6 +378,12 @@ text_sensor:
     id: apollo_firmware_version
     update_interval: never
     entity_category: "diagnostic"
+  - platform: uptime
+    name: Uptime
+    id: sys_uptime
+    update_interval: 60s
+    format:
+      separator: " "
 
 script:
   - id: pumpUntilFull

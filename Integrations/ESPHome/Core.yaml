@@ -31,6 +31,8 @@ esphome:
               - lambda: "id(testScript).execute();"
 
 api:
+  # Web-server-only use: don't reboot every 15 min when no API client (Home Assistant) is connected
+  reboot_timeout: 0s
   actions:
     - action: play_buzzer
       variables:
@@ -64,6 +66,10 @@ globals:
     initial_value: "true"
   - id: testCycleCount
     type: int
+  - id: wet_elapsed_min
+    type: int
+    restore_value: no
+    initial_value: '0'
 
 captive_portal:
 
@@ -94,10 +100,8 @@ button:
     icon: mdi:pump
     on_press:
       then:
-        - switch.turn_on: pump_control
-        - delay: !lambda 'return (int)id(pump_run_seconds).state * 1000;'
-        - switch.turn_off: pump_control
-      
+        - script.execute: run_pump_timed
+
   - platform: template
     name: "Run Pump Until Output Wet"
     id: run_pump_until_out_wet
@@ -252,6 +256,39 @@ number:
     unit_of_measurement: "s"
     restore_value: true
     mode: box
+  - platform: template
+    name: "Run Until Wet Every"
+    id: wet_every_minutes
+    icon: mdi:timer-sync
+    optimistic: true
+    min_value: 0
+    max_value: 7200
+    step: 1
+    initial_value: 0
+    unit_of_measurement: "min"
+    restore_value: true
+    mode: box
+    # Restart the countdown whenever the interval is changed (and at boot).
+    # -1 so the partial minute before the next interval tick isn't counted.
+    on_value:
+      - lambda: 'id(wet_elapsed_min) = -1;'
+
+# Run the pump until the output is wet every "Run Until Wet Every" minutes (0 = off)
+interval:
+  - interval: 1min
+    then:
+      - lambda: |-
+          // Round the same way the web UI displays the value, so anything shown as 0 is off
+          int every = (int) lrintf(id(wet_every_minutes).state);
+          if (every <= 0)
+            return;
+          if (id(wet_elapsed_min) < every)
+            id(wet_elapsed_min) += 1;
+          // If the pump is running or a timed manual run is pending, wait for it to finish
+          if (id(wet_elapsed_min) >= every && !id(pump_control).state && !id(run_pump_timed).is_running()) {
+            id(wet_elapsed_min) = 0;
+            id(pumpUntilFull).execute();
+          }
 
 sensor:
   - platform: internal_temperature

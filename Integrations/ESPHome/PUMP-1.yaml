@@ -1,7 +1,7 @@
 esphome:
   name: "${name}"
   friendly_name: Apollo PUMP-1
-  comment: Apollo PUMP-1
+  comment: Apollo PUMP-1 (Run Until Wet build)
   name_add_mac_suffix: true
   platformio_options:
     board_build.flash_mode: dio

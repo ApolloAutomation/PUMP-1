@@ -1,11 +1,13 @@
 substitutions:
   name: apollo-pump-1
   friendly_name: Apollo Pump-1
-  version: "25.8.6.1"
+  version: "26.11.16.1"
   device_description: ${name} made by Apollo Automation - version ${version}.
+  # Bluetooth Proxy switch state on a device with no stored preference yet
+  # (first boot after this switch was added, or after a factory reset).
+  bluetooth_proxy_restore_mode: RESTORE_DEFAULT_OFF
 
 esp32:
-  board: esp32-c6-devkitm-1
   variant: esp32c6
   flash_size: 8MB
   framework:
@@ -22,14 +24,25 @@ esphome:
             id(pump_start_time) = 0;
             id(safety_alert_active) = false;
         - script.execute: pump_safety_check
-
     - priority: -100
       then:
         - lambda: |-
             if (id(sntp_time).now().timestamp == 0) {
               id(last_run_timestamp) = 0;  // discard stale value
             }
-
+    - priority: -20
+      then:
+        - if:
+            condition:
+              switch.is_on: tank_refill_mode
+            then:
+              - switch.turn_on: stop_pump_when_full
+              - switch.turn_off: stop_pump_when_dry
+              - switch.turn_on: auto_refill
+            else:
+              - switch.turn_off: stop_pump_when_full
+              - switch.turn_on: stop_pump_when_dry
+              - switch.turn_off: auto_refill
     - priority: -100
       then:
         - delay: 1000ms
@@ -41,6 +54,25 @@ esphome:
               - lambda: "return id(runTest);"
             then:
               - lambda: "id(testScript).execute();"
+    # Re-apply the Bluetooth Proxy switch after all components set up, so BLE
+    # scanning matches the switch state restored from flash.
+    - priority: -300
+      then:
+        - if:
+            condition:
+              switch.is_on: bluetooth_proxy_switch
+            then:
+              - esp32_ble_tracker.start_scan:
+                  continuous: true
+            else:
+              - esp32_ble_tracker.stop_scan:
+
+esp32_ble_tracker:
+  id: ble_tracker
+  scan_parameters:
+    continuous: true
+
+bluetooth_proxy:
 
 # Enable logging
 logger:
@@ -55,21 +87,22 @@ wifi:
     password: "D9xJDUpZF6EP"
 
 api:
-  services:
-    - service: play_buzzer
+  encryption:
+  actions:
+    - action: play_buzzer
       variables:
         song_str: string
       then:
         - rtttl.play:
-            rtttl: !lambda "return song_str;"
-    - service: run_pump_for_seconds
+            rtttl: !lambda 'return song_str;'
+    - action: run_pump_for_seconds
       variables:
         seconds: int
       then:
         - switch.turn_on: pump_control
         - delay: !lambda "return seconds * 1000;"
         - switch.turn_off: pump_control
-    - service: run_pump_until_full
+    - action: run_pump_until_full
       then:
         - script.execute: pumpUntilFull
 
@@ -106,11 +139,16 @@ globals:
     initial_value: "true"
   - id: testCycleCount
     type: int
+  - id: button_press_timestamp
+    restore_value: no
+    type: uint32_t
+    initial_value: "0"
 
 captive_portal:
 
 web_server:
   port: 80
+  version: 3
 
 # Buzzer
 
@@ -200,6 +238,30 @@ switch:
     icon: mdi:water-sync
     entity_category: config
   - platform: template
+    name: "Tank Refill Mode"
+    id: tank_refill_mode
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    icon: mdi:water-sync
+    entity_category: config
+    on_turn_on:
+      then:
+        - switch.turn_on: stop_pump_when_full
+        - switch.turn_off: stop_pump_when_dry
+        - switch.turn_on: auto_refill
+    on_turn_off:
+      then:
+        - switch.turn_off: stop_pump_when_full
+        - switch.turn_on: stop_pump_when_dry
+        - switch.turn_off: auto_refill
+  - platform: template
+    name: "Auto Refill"
+    id: auto_refill
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    icon: mdi:autorenew
+    entity_category: config
+  - platform: template
     name: "Pump Safety Override"
     id: pump_safety_override
     entity_category: config
@@ -207,6 +269,18 @@ switch:
     restore_mode: RESTORE_DEFAULT_OFF
     icon: mdi:shield-alert-outline
     disabled_by_default: true
+  - platform: template
+    name: "Bluetooth Proxy"
+    id: bluetooth_proxy_switch
+    icon: mdi:bluetooth
+    entity_category: "config"
+    restore_mode: ${bluetooth_proxy_restore_mode}
+    optimistic: true
+    on_turn_on:
+      - esp32_ble_tracker.start_scan:
+          continuous: true
+    on_turn_off:
+      - esp32_ble_tracker.stop_scan:
 
   - platform: gpio
     pin: GPIO7
@@ -219,10 +293,21 @@ switch:
         - if:
             condition:
               or:
-                - binary_sensor.is_on: fluid_input_sensor
+                # Normal mode: input has water
+                - and:
+                    - switch.is_off: tank_refill_mode
+                    - binary_sensor.is_on: fluid_input_sensor
+                # Inverted mode: input is dry (destination is low, needs filling)
+                - and:
+                    - switch.is_on: tank_refill_mode
+                    - binary_sensor.is_off: fluid_input_sensor
+                # Bypass: dry protection not enabled
                 - switch.is_off: stop_pump_when_dry
             then:
               - logger.log: "Pump turning on - conditions met"
+              - text_sensor.template.publish:
+                  id: last_pump_action
+                  state: "Pump Started"
               - lambda: |-
                   id(pump_start_time) = millis();
                   id(safety_alert_active) = false;
@@ -232,10 +317,17 @@ switch:
               - switch.turn_off: pump_control
     on_turn_off:
       then:
+        - if:
+            condition:
+              lambda: 'return id(pump_start_time) != 0;'
+            then:
+              - logger.log: "Pump turned off"
+              - text_sensor.template.publish:
+                  id: last_pump_action
+                  state: "Pump Stopped"
         - lambda: |-
             id(pump_start_time) = 0;
             id(safety_alert_active) = false;
-        - logger.log: "Pump turned off"
 
 binary_sensor:
   - platform: status
@@ -249,29 +341,37 @@ binary_sensor:
       mode:
         input: true
         pullup: true
-    on_multi_click:
-      - timing:
-          - ON for at least 10s
-        then:
-          - button.press: factory_reset_all
-      - timing:
-          - ON for at least 3s
-          - OFF for at least 0.2s
-        then:
-          - script.execute: statusCheck
-          - delay: 3s
-          - globals.set:
-              id: testCycleCount
-              value: "0"
-          - globals.set:
-              id: runTest
-              value: "true"
-          - script.execute: testScript
-      - timing:
-          - ON for at most 1s
-          - OFF for at least 0.2s
-        then:
-          - script.execute: run_pump_timed
+      ignore_strapping_warning: true
+    # Timed on release: tap (< 3 s) runs the pump for Pump Run Seconds, shows
+    # the network status and runs the self-test; >= 10 s factory-resets.
+    # Mains powered, so the 3-10 s hold (Prevent Sleep on battery products)
+    # does nothing.
+    on_press:
+      then:
+        - lambda: |-
+            id(button_press_timestamp) = millis();
+    on_release:
+      then:
+        - if:
+            condition:
+              lambda: 'return millis() - id(button_press_timestamp) >= 10000;'
+            then:
+              - button.press: factory_reset_all
+            else:
+              - if:
+                  condition:
+                    lambda: 'return millis() - id(button_press_timestamp) < 3000;'
+                  then:
+                    - script.execute: run_pump_timed
+                    - script.execute: statusCheck
+                    - delay: 3s
+                    - globals.set:
+                        id: testCycleCount
+                        value: "0"
+                    - globals.set:
+                        id: runTest
+                        value: "true"
+                    - script.execute: testScript
 
   - platform: gpio
     name: Fluid Input
@@ -284,6 +384,20 @@ binary_sensor:
         input: true
         pullup: true
       inverted: true
+    on_release:
+      then:
+        - if:
+            condition:
+              and:
+                - switch.is_on: auto_refill
+                - switch.is_on: tank_refill_mode
+                - switch.is_off: pump_control
+            then:
+              - logger.log: "Auto refill triggered - tank level low"
+              - text_sensor.template.publish:
+                  id: last_pump_action
+                  state: "Auto Refill Triggered"
+              - script.execute: pumpUntilFull
 
   - platform: gpio
     name: Fluid Output
@@ -406,7 +520,7 @@ light:
     default_transition_length: 0s
     chipset: WS2812
     num_leds: 1
-    rgb_order: grb
+    channel_colors: GRB
     # Add explicit power supply limit to prevent current spikes
     max_refresh_rate: 20ms
     effects:
@@ -422,6 +536,26 @@ light:
           update_interval: 100ms
           min_brightness: 50%
           max_brightness: 100%
+
+text_sensor:
+  - platform: template
+    name: "Last Pump Action"
+    id: last_pump_action
+    icon: mdi:pump
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
+      id: wifi_ip
+      entity_category: "diagnostic"
+  - platform: version
+    name: "ESPHome Version"
+    hide_timestamp: true
+    entity_category: "diagnostic"
+  - platform: template
+    name: "Apollo Firmware Version"
+    id: apollo_firmware_version
+    update_interval: never
+    entity_category: "diagnostic"
 
 script:
   - id: pumpUntilFull
@@ -497,8 +631,18 @@ script:
             - if:
                 condition:
                   - and:
-                      - switch.is_on: stop_pump_when_dry
+                      - switch.is_on: tank_refill_mode
+                      - switch.is_off: stop_pump_when_full
                       - binary_sensor.is_on: fluid_input_sensor
+                then:
+                  - logger.log: "Pump stopping - destination full (inverted mode)"
+                  - switch.turn_off: pump_control
+            - if:
+                condition:
+                  - and:
+                      - switch.is_on: stop_pump_when_dry
+                      - switch.is_off: tank_refill_mode
+                      - binary_sensor.is_off: fluid_input_sensor
                 then:
                   - logger.log: "Pump stopping - input dry"
                   - switch.turn_off: pump_control

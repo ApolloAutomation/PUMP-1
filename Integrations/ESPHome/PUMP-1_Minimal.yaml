@@ -3,14 +3,19 @@ esphome:
   friendly_name: Apollo PUMP-1
   comment: Apollo PUMP-1
   name_add_mac_suffix: true
-  platformio_options:
-    board_build.flash_mode: dio
-
   project:
     name: "ApolloAutomation.PUMP-1"
     version: "${version}"
 
-  min_version: 2023.11.1
+  min_version: 2026.10.0
+  # List form so package merging concatenates with Core's on_boot entries
+  # (mapping form replaced them, dropping Core's boot actions).
+  on_boot:
+    - priority: 500
+      then:
+        - text_sensor.template.publish:
+            id: apollo_firmware_version
+            state: "${version}"
 
 dashboard_import:
   package_import_url: github://ApolloAutomation/PUMP-1/Integrations/ESPHome/PUMP-1_Minimal.yaml
@@ -21,6 +26,8 @@ ota:
     id: ota_esphome
 
 wifi:
+  # Keeps today's no-reboot on lost Wi-Fi; 2026.11 drops the AP exemption
+  reboot_timeout: 0s
   ap:
     ssid: "Apollo PUMP-1 Hotspot"
 

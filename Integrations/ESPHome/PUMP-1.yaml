@@ -1,12 +1,22 @@
+substitutions:
+  # Manifest URL bases. Stable = GitHub Pages (main branch builds).
+  # Beta = rolling "beta-fw" pre-release assets (beta branch builds).
+  stable_manifest_base: "https://apolloautomation.github.io/PUMP-1"
+  beta_manifest_base: "https://github.com/ApolloAutomation/PUMP-1/releases/download/beta-fw"
+  ota_stable_manifest: "${stable_manifest_base}/firmware/manifest.json"
+  ota_beta_manifest: "${beta_manifest_base}/manifest-standard.json"
+
 esphome:
   name: "${name}"
   friendly_name: Apollo PUMP-1
   comment: Apollo PUMP-1
   name_add_mac_suffix: true
-  platformio_options:
-    board_build.flash_mode: dio
-
   on_boot:
+  - priority: 500
+    then:
+      - text_sensor.template.publish:
+          id: apollo_firmware_version
+          state: "${version}"
   - priority: -10
     then:
       - if:
@@ -14,12 +24,15 @@ esphome:
             - lambda: "return id(runTest);"
           then:
             - lambda: "id(testScript).execute();"
+  - priority: -100
+    then:
+      - script.execute: apply_ota_source
 
   project:
     name: "ApolloAutomation.PUMP-1"
     version: "${version}"
 
-  min_version: 2023.11.1
+  min_version: 2026.10.0
 
 dashboard_import:
   package_import_url: github://ApolloAutomation/PUMP-1/Integrations/ESPHome/PUMP-1_Minimal.yaml
@@ -27,7 +40,7 @@ dashboard_import:
 
 improv_serial:
 
-esp32_improv:
+improv_ble:
   authorizer: none
 
 ota:
@@ -38,6 +51,14 @@ ota:
 
 http_request:
   verify_ssl: true
+  # GitHub release-asset downloads answer with a redirect carrying a
+  # ~3.6 KB Content-Security-Policy header; each header line must fit
+  # this buffer or the request fails with "HTTP_CLIENT: Out of buffer".
+  buffer_size_rx: 5120
+  # The redirect target is a signed URL with a ~850-char query string; the
+  # follow-up request line must fit the TX buffer or esp_http_client_open
+  # fails with "Out of buffer" before sending anything.
+  buffer_size_tx: 2048
 
 safe_mode:
 
@@ -49,14 +70,56 @@ update:
 
 wifi:
   on_connect:
-    - delay: 5s
-    - ble.disable:
-  on_disconnect:
-    - ble.enable:
+    - component.update: firmware_update
+  # Keeps today's no-reboot on lost Wi-Fi; 2026.11 drops the AP exemption
+  reboot_timeout: 0s
   ap:
     ssid: "Apollo PUMP-1 Hotspot"
 
 logger:
+
+button:
+  - platform: template
+    name: "Firmware Update"
+    id: update_firmware
+    icon: mdi:cloud-download
+    entity_category: "config"
+    on_press:
+      - logger.log: "Applying firmware update for the selected channel"
+      - delay: 3s
+      - script.execute: apply_ota_source
+      - script.wait: apply_ota_source
+      # The manifest fetch runs in its own task; give it a fixed window to land
+      # (update.is_available stays false for same-version switches).
+      - delay: 5s
+      - lambda: id(firmware_update).perform(true);
+
+select:
+  - platform: template
+    name: "Firmware Channel"
+    id: firmware_channel
+    icon: mdi:source-branch
+    entity_category: "config"
+    optimistic: true
+    restore_value: true
+    options:
+      - "Stable"
+      - "Beta"
+    initial_option: "Stable"
+    on_value:
+      then:
+        - script.execute: apply_ota_source
+
+script:
+  - id: apply_ota_source
+    # Sets the OTA manifest URL from the Firmware Channel select (Stable/Beta).
+    then:
+      - lambda: |-
+          const bool beta = id(firmware_channel).current_option() == "Beta";
+          const char *url = beta ? "${ota_beta_manifest}" : "${ota_stable_manifest}";
+          ESP_LOGI("firmware", "OTA manifest set to: %s", url);
+          id(firmware_update).set_source_url(url);
+      - component.update: firmware_update
 
 packages:
   core: !include Core.yaml

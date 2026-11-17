@@ -1,0 +1,188 @@
+substitutions:
+  version: "26.11.17.1-standalone-auto-refill"
+
+esphome:
+  name: "${name}"
+  friendly_name: Apollo PUMP-1
+  comment: Standalone Auto Refill build
+  name_add_mac_suffix: true
+  platformio_options:
+    board_build.flash_mode: dio
+
+  on_boot:
+    - priority: -200
+      then:
+        - delay: 2s
+        - script.execute: update_status
+        - script.execute: auto_refill_check
+
+  project:
+    name: "ApolloAutomation.PUMP-1"
+    version: "${version}"
+
+  min_version: 2023.11.1
+
+improv_serial:
+
+esp32_improv:
+  authorizer: none
+
+# No update entity: stock firmware must not replace this build
+ota:
+  - platform: esphome
+    id: ota_esphome
+
+wifi:
+  on_connect:
+    - delay: 5s
+    - ble.disable:
+  on_disconnect:
+    - ble.enable:
+  ap:
+    ssid: "Apollo PUMP-1 Hotspot"
+
+logger:
+
+packages:
+  core: !include Core.yaml
+
+api:
+  # Runs without Home Assistant; never reboot for it
+  reboot_timeout: 0s
+
+globals:
+  - id: refill_active
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: refill_start_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+  - id: refill_fault
+    type: bool
+    restore_value: yes
+    initial_value: "false"
+
+switch:
+  - platform: template
+    name: "Auto Refill"
+    id: auto_refill
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    icon: mdi:water-sync
+    on_turn_on:
+      - script.execute: update_status
+      - script.execute: auto_refill_check
+    on_turn_off:
+      - if:
+          condition:
+            lambda: "return id(refill_active);"
+          then:
+            - switch.turn_off: pump_control
+      - script.execute: update_status
+
+  # Upper sensor always stops the pump in this build
+  - id: !extend stop_pump_when_full
+    internal: true
+    restore_mode: ALWAYS_ON
+  # Lower sensor must not block refills
+  - id: !extend stop_pump_when_dry
+    internal: true
+    restore_mode: ALWAYS_OFF
+  # Safety cutoff cannot be bypassed here
+  - id: !extend pump_safety_override
+    internal: true
+    restore_mode: ALWAYS_OFF
+
+  - id: !extend pump_control
+    name: "Pump"
+    entity_category: ""
+    disabled_by_default: false
+    on_turn_on:
+      - script.execute: update_status
+
+binary_sensor:
+  - id: !extend fluid_input_sensor
+    name: "Lower Sensor"
+    on_release:
+      - script.execute: auto_refill_check
+  - id: !extend fulid_output_sensor
+    name: "Upper Sensor"
+    on_release:
+      - script.execute: auto_refill_check
+
+text_sensor:
+  - platform: template
+    name: "Refill Status"
+    id: refill_status
+    icon: mdi:information-outline
+
+button:
+  - platform: template
+    name: "Stop Pump"
+    id: stop_pump_button
+    icon: mdi:stop
+    on_press:
+      - script.stop: run_pump_timed
+      - switch.turn_off: pump_control
+
+  - platform: template
+    name: "Clear Fault"
+    id: clear_fault_button
+    icon: mdi:alert-remove-outline
+    on_press:
+      - lambda: "id(refill_fault) = false;"
+      - script.execute: update_status
+      - script.execute: auto_refill_check
+
+script:
+  - id: auto_refill_check
+    then:
+      - if:
+          condition:
+            lambda: |-
+              return id(auto_refill).state && !id(refill_fault) &&
+                     !id(pump_control).state &&
+                     !id(fluid_input_sensor).state &&
+                     !id(fulid_output_sensor).state;
+          then:
+            - logger.log: "Auto refill: lower sensor dry, starting pump"
+            - lambda: |-
+                id(refill_active) = true;
+                id(refill_start_ms) = millis();
+            - switch.turn_on: pump_control
+      - script.execute: update_status
+
+  - id: update_status
+    then:
+      - lambda: |-
+          std::string s;
+          if (id(refill_fault))
+            s = "Fault: Max Safe Run Time reached, press Clear Fault";
+          else if (id(refill_active) && id(pump_control).state)
+            s = "Refilling";
+          else if (id(pump_control).state)
+            s = "Pump running (manual)";
+          else if (!id(auto_refill).state)
+            s = "Auto Refill off";
+          else if (!id(fluid_input_sensor).state && id(fulid_output_sensor).state)
+            s = "Check sensors: lower dry, upper wet";
+          else
+            s = "Idle";
+          if (id(refill_status).state != s)
+            id(refill_status).publish_state(s);
+
+  # Runs after the stock safety loop ends
+  - id: !extend pump_safety_check
+    then:
+      - lambda: |-
+          if (id(refill_active) && !id(fulid_output_sensor).state) {
+            uint32_t runtime = (millis() - id(refill_start_ms)) / 1000;
+            if (runtime > id(max_safe_run_time).state) {
+              ESP_LOGW("auto_refill", "Upper sensor not reached; fault set");
+              id(refill_fault) = true;
+            }
+          }
+          id(refill_active) = false;
+      - script.execute: update_status

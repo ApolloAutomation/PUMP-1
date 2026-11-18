@@ -1,6 +1,6 @@
 substitutions:
   name: apollo-pump-1
-  version: "26.11.15.1"
+  version: "26.11.17.1"
   device_description: ${name} made by Apollo Automation - version ${version}.
   # Bluetooth Proxy switch state on a device with no stored preference yet
   # (first boot after this switch was added, or after a factory reset).
@@ -20,19 +20,6 @@ esphome:
             id(pump_start_time) = 0;
             id(safety_alert_active) = false;
         - script.execute: pump_safety_check
-    - priority: -20
-      then:
-        - if:
-            condition:
-              switch.is_on: tank_refill_mode
-            then:
-              - switch.turn_on: stop_pump_when_full
-              - switch.turn_off: stop_pump_when_dry
-              - switch.turn_on: auto_refill
-            else:
-              - switch.turn_off: stop_pump_when_full
-              - switch.turn_on: stop_pump_when_dry
-              - switch.turn_off: auto_refill
     - priority: -100
       then:
         - delay: 1000ms
@@ -174,16 +161,27 @@ switch:
     restore_mode: RESTORE_DEFAULT_OFF
     icon: mdi:water-sync
     entity_category: config
+    # Only apply the presets when the user flips the mode. The boot-time
+    # restore also fires these triggers, and must not overwrite the
+    # individually restored Wet/Dry/Auto Refill switches.
     on_turn_on:
       then:
-        - switch.turn_on: stop_pump_when_full
-        - switch.turn_off: stop_pump_when_dry
-        - switch.turn_on: auto_refill
+        - if:
+            condition:
+              lambda: 'return App.is_setup_complete();'
+            then:
+              - switch.turn_on: stop_pump_when_full
+              - switch.turn_off: stop_pump_when_dry
+              - switch.turn_on: auto_refill
     on_turn_off:
       then:
-        - switch.turn_off: stop_pump_when_full
-        - switch.turn_on: stop_pump_when_dry
-        - switch.turn_off: auto_refill
+        - if:
+            condition:
+              lambda: 'return App.is_setup_complete();'
+            then:
+              - switch.turn_off: stop_pump_when_full
+              - switch.turn_on: stop_pump_when_dry
+              - switch.turn_off: auto_refill
   - platform: template
     name: "Auto Refill"
     id: auto_refill
@@ -294,6 +292,9 @@ binary_sensor:
                   then:
                     - script.execute: run_pump_timed
                     - script.execute: statusCheck
+                    # Let the status colour finish before the self-test
+                    # LED takes over, then pause without blocking the loop.
+                    - script.wait: statusCheck
                     - delay: 3s
                     - globals.set:
                         id: testCycleCount
